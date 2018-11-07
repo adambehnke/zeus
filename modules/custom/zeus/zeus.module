@@ -1,0 +1,473 @@
+<?php
+
+/**
+ * @file
+ * Zeus module.
+ */
+
+/**
+ * @defgroup zeus
+ * @ingroup zeus
+ * @{
+ * Job submission form.
+ *
+ */
+
+#define('SERVER_IP_SMALL', '10.0.1.225');
+#define('SERVER_IP_MEDIUM', '10.0.1.246');
+#define('SERVER_IP_LARGE', '10.0.1.103');
+#define('SERVER_IP', '10.0.1.219');
+
+function zeus_cron() {
+
+//0005~0005~0005~01~3~  68.476~00000000~00000000~00000000~00000000~00000000~00000000~00000000~00000~00~00
+
+  $files = glob('/var/www/html/zeus/files/*.{txt}', GLOB_BRACE);
+  backdrop_set_message(print_r($files,true));
+  $result = array();
+
+  foreach($files as $file) {
+    $handle = fopen($file, "r");
+    if ($handle) {
+      backdrop_set_message(print_r($file,true));
+      while (($line = fgets($handle)) !== false) {
+        $line = explode('~', $line);
+        $message_id = $line[0];
+        $measurement_id = $line[1];
+        $nid = ltrim($line[2], '0');
+        $measurement_type = ltrim($line[3], '0');
+        $command_response = $line[4];
+        $max_dim = $line[5];
+        $min_dim = $line[6];
+        $dim_x = $line[7];
+        $dim_y = $line[8];
+        $dim_z = $line[9];
+        $groove_dep_x = $line[10];
+        $groove_dep_z = $line[11];
+        $groove_width = $line[12];
+        $probe_clear_resp = $line[13];
+        $probe_id = $line[14];
+        $num_resp = $line[15];
+        $cnc_start_resp = $line[16];
+        $cnc_stop_resp = $line[17];
+        #$response_payload = $message_id . '~' . $measurement_id . '~' . $job_id . '~' . $measurement_type . '~';
+        #$response_payload .= $command_response . '~' . $max_dim . '~' . $min_dim . '~' . $dim_x . '~' . $dim_y . '~';
+        #$response_payload .= $dim_z . '~' . $groove_dep_x . '~' . $groove_dep_z . '~' . $groove_width . '~';
+        #$response_payload .= $probe_clear_resp . '~' . $probe_id . '~' . $num_resp . $cnc_start_resp . '~' . $cnc_stop_resp . "\n";
+
+        //backdrop_set_message(print_r($line,true));
+        $row = db_query('SELECT nid FROM {node} WHERE nid = :mytitle', array(':mytitle' => $nid))->fetchField();
+        $node = node_load($row);
+        //backdrop_set_message('<pre>'.print_r($node,true).'</pre>');
+        backdrop_set_message(print_r($nid,true));
+
+        if (isset($node) && isset($node->field_part_measurement)) {
+          foreach ($node->field_part_measurement[LANGUAGE_NONE] as $key => $value) {
+            $measurements[] = entity_load('paragraphs_item', $value['value']);
+          }
+        }
+
+        $measurement_id_list = '';
+        if (isset($measurements)) {
+          foreach ($measurements as $mkey => $mvalue) {
+            //$measurement_id_list[] = $mvalue->field_measurement_id[LANGUAGE_NONE][0]['value'];
+            //$message_id_list[] = $mvalue->field_message_id[LANGUAGE_NONE][0]['value'];
+            $measurement_id_list[$mvalue->item_id] = $mvalue;
+          }
+        }
+
+        @$actual = $measurement_id_list[(int)$measurement_id];
+        //backdrop_set_message('<pre>' . print_r($actual,true) . '</pre>');
+        //backdrop_set_message('<pre>' . print_r((int)$measurement_id,true) . '</pre>');
+
+        //MEASUREMENT TYPES
+        // 01 - 192 - Length
+        // 02 - 193 - Back Length
+        // 03 - 194 - OD
+        // 04 - 195 - ID
+        // 05 - 196 - Face Groove
+        // 06 - 197 - OD Groove
+        // 07 - 198 - ID Depth
+
+
+        // Measurement not yet attached to job, insert it.
+        if ($max_dim) {
+          $node->field_status[LANGUAGE_NONE][0]['tid'] = 191;
+
+          $new_node = new stdClass();
+          $new_node->title = $node->title;
+          $new_node->type = 'measuring_result';
+          node_object_prepare($new_node);
+          $new_node->language = LANGUAGE_NONE;
+          global $user;
+          $new_node->uid = $user->uid;
+          $new_node->status = 1;
+          $new_node->promote = 0;
+          $new_node->comment = 0;
+
+          backdrop_set_message(print_r($measurement_type,true));
+          switch ($measurement_type) {
+            case 1:
+              $paragraph = new ParagraphsItemEntity(array('field_name' => 'field_complete_measurement', 'bundle' => 'complete_measurement'));
+              $paragraph->is_new = TRUE;
+              $paragraph->setHostEntity('node', $node);
+              $paragraph->field_measurement_id[LANGUAGE_NONE][0]['value'] = (int)$measurement_id;
+              $paragraph->field_measured_length[LANGUAGE_NONE][0]['value'] = $max_dim;
+              $paragraph->field_measurement_position[LANGUAGE_NONE][0]['value'] = 'Z';
+              $paragraph->field_measurement_type[LANGUAGE_NONE][0]['tid'] = 192;
+
+              if ($max_dim >= $actual->field_minimum[LANGUAGE_NONE][0]['value'] &&
+                $max_dim <= $actual->field_maximum[LANGUAGE_NONE][0]['value']) {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Good';
+              }
+              else {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Bad';
+              }
+
+              $paragraph->save();
+              backdrop_set_message(print_r($node,true));
+              break;
+            case 2:
+              $paragraph = new ParagraphsItemEntity(array('field_name' => 'field_complete_measurement', 'bundle' => 'complete_measurement'));
+              $paragraph->is_new = TRUE;
+              $paragraph->setHostEntity('node', $node);
+              $paragraph->field_measurement_id[LANGUAGE_NONE][0]['value'] = (int)$measurement_id;
+              $paragraph->field_measured_length[LANGUAGE_NONE][0]['value'] = $max_dim;
+              $paragraph->field_measurement_position[LANGUAGE_NONE][0]['value'] = 'Z';
+              $paragraph->field_measurement_type[LANGUAGE_NONE][0]['tid'] = 193;
+
+              if ($max_dim >= $actual->field_minimum[LANGUAGE_NONE][0]['value'] &&
+                $max_dim <= $actual->field_maximum[LANGUAGE_NONE][0]['value']) {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Good';
+              }
+              else {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Bad';
+              }
+
+              $paragraph->save();
+              backdrop_set_message(print_r($node,true));
+              break;
+            case 3:
+              $paragraph = new ParagraphsItemEntity(array('field_name' => 'field_complete_measurement', 'bundle' => 'complete_measurement'));
+              $paragraph->is_new = TRUE;
+              $paragraph->setHostEntity('node', $node);
+              $paragraph->field_measurement_id[LANGUAGE_NONE][0]['value'] = (int)$measurement_id;
+              $paragraph->field_measured_dimension[LANGUAGE_NONE][0]['value'] = $max_dim;
+              $paragraph->field_measurement_position[LANGUAGE_NONE][0]['value'] = 'X';
+              $paragraph->field_measurement_type[LANGUAGE_NONE][0]['tid'] = 194;
+
+              if ($max_dim >= $actual->field_minimum[LANGUAGE_NONE][0]['value'] &&
+                $max_dim <= $actual->field_maximum[LANGUAGE_NONE][0]['value']) {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Good';
+              }
+              else {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Bad';
+              }
+
+              $paragraph->save();
+              backdrop_set_message(print_r($node,true));
+              break;
+            case 4:
+              $paragraph = new ParagraphsItemEntity(array('field_name' => 'field_complete_measurement', 'bundle' => 'complete_measurement'));
+              $paragraph->is_new = TRUE;
+              $paragraph->setHostEntity('node', $node);
+              $paragraph->field_measurement_id[LANGUAGE_NONE][0]['value'] = (int)$measurement_id;
+              $paragraph->field_measured_dimension[LANGUAGE_NONE][0]['value'] = $max_dim;
+              $paragraph->field_measurement_position[LANGUAGE_NONE][0]['value'] = 'X';
+              $paragraph->field_measurement_type[LANGUAGE_NONE][0]['tid'] = 195;
+              /*
+              if ($max_dim >= $actual->field_minimum[LANGUAGE_NONE][0]['value'] &&
+                $max_dim <= $actual->field_maximum[LANGUAGE_NONE][0]['value']) {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Good';
+              }
+              else {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Bad';
+              }*/
+
+              $paragraph->save();
+              backdrop_set_message(print_r($node,true));
+              break;
+            case 5:
+              $paragraph = new ParagraphsItemEntity(array('field_name' => 'field_complete_measurement', 'bundle' => 'complete_measurement'));
+              $paragraph->is_new = TRUE;
+              $paragraph->setHostEntity('node', $node);
+              $paragraph->field_measurement_id[LANGUAGE_NONE][0]['value'] = (int)$measurement_id;
+              $paragraph->field_width[LANGUAGE_NONE][0]['value'] = $max_dim;
+              $paragraph->field_measured_depth[LANGUAGE_NONE][0]['value'] = $min_dim;
+              $paragraph->field_measured_diameter[LANGUAGE_NONE][0]['value'] = $dim_x;
+              $paragraph->field_measurement_position[LANGUAGE_NONE][0]['value'] = '';
+              $paragraph->field_measurement_type[LANGUAGE_NONE][0]['tid'] = 196;
+              /*
+              if ($max_dim >= $actual->field_minimum[LANGUAGE_NONE][0]['value'] &&
+                $max_dim <= $actual->field_maximum[LANGUAGE_NONE][0]['value']) {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Good';
+              }
+              else {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Bad';
+              }*/
+
+              $paragraph->save();
+              backdrop_set_message(print_r($node,true));
+              break;
+            case 6:
+              $paragraph = new ParagraphsItemEntity(array('field_name' => 'field_complete_measurement', 'bundle' => 'complete_measurement'));
+              $paragraph->is_new = TRUE;
+              $paragraph->setHostEntity('node', $node);
+              $paragraph->field_measurement_id[LANGUAGE_NONE][0]['value'] = (int)$measurement_id;
+              $paragraph->field_measured_length[LANGUAGE_NONE][0]['value'] = $max_dim;
+              $paragraph->field_width[LANGUAGE_NONE][0]['value'] = $min_dim;
+              $paragraph->field_measured_diameter[LANGUAGE_NONE][0]['value'] = $dim_x;
+              $paragraph->field_measurement_position[LANGUAGE_NONE][0]['value'] = '';
+              $paragraph->field_measurement_type[LANGUAGE_NONE][0]['tid'] = 197;
+              /*
+              if ($max_dim >= $actual->field_minimum[LANGUAGE_NONE][0]['value'] &&
+                $max_dim <= $actual->field_maximum[LANGUAGE_NONE][0]['value']) {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Good';
+              }
+              else {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Bad';
+              }*/
+
+              $paragraph->save();
+              backdrop_set_message(print_r($node,true));
+              break;
+            case 7:
+              $paragraph = new ParagraphsItemEntity(array('field_name' => 'field_complete_measurement', 'bundle' => 'complete_measurement'));
+              $paragraph->is_new = TRUE;
+              $paragraph->setHostEntity('node', $node);
+              $paragraph->field_measurement_id[LANGUAGE_NONE][0]['value'] = (int)$measurement_id;
+              $paragraph->field_measured_length[LANGUAGE_NONE][0]['value'] = $max_dim;
+              $paragraph->field_measurement_position[LANGUAGE_NONE][0]['value'] = 'Z';
+              $paragraph->field_measurement_type[LANGUAGE_NONE][0]['tid'] = 198;
+
+              if ($max_dim >= $actual->field_minimum[LANGUAGE_NONE][0]['value'] &&
+                $max_dim <= $actual->field_maximum[LANGUAGE_NONE][0]['value']) {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Good';
+              }
+              else {
+                $paragraph->field_measurement_valid[LANGUAGE_NONE][0]['value'] = 'Bad';
+              }
+
+              $paragraph->save();
+              backdrop_set_message(print_r($node,true));
+              break;
+          } // end switch measurement type
+          //node_save($node);
+        } // end if max_dim set (result valid)
+
+        /*if (!in_array($message_id, $message_id_list) && !in_array($measurement_id, $measurement_id_list)) {
+          // Measurement not yet attached to job, insert it.
+          $paragraph = new ParagraphsItemEntity(array('field_name' => 'field_part_measurement', 'bundle' => 'measurements'));
+          $paragraph->is_new = TRUE;
+          $paragraph->setHostEntity('node', $node);
+          $paragraph->field_message_id[LANGUAGE_NONE][0]['value'] = $message_id;
+          $paragraph->field_measurement_id[LANGUAGE_NONE][0]['value'] = $measurement_id;
+          $paragraph->field_measurement_type[LANGUAGE_NONE][0]['value'] = $measurement_type;
+          $paragraph->field_maximum[LANGUAGE_NONE][0]['value'] = $max_dim;
+          $paragraph->field_minimum[LANGUAGE_NONE][0]['value'] = $min_dim;
+          $paragraph->field_nominal[LANGUAGE_NONE][0]['value'] = 0;
+          $paragraph->field_dimension_location_x[LANGUAGE_NONE][0]['value'] = $dim_x;
+          $paragraph->field_dimension_location_z[LANGUAGE_NONE][0]['value'] = $dim_z;
+          $paragraph->field_depth_x[LANGUAGE_NONE][0]['value'] = $groove_dep_x;
+          $paragraph->field_depth_z[LANGUAGE_NONE][0]['value'] = $groove_dep_z;
+          $paragraph->field_width[LANGUAGE_NONE][0]['value'] = $groove_width;
+          $paragraph->field_probe_clearance[LANGUAGE_NONE][0]['value'] = $probe_clear_resp;
+          $paragraph->field_probe_used[LANGUAGE_NONE][0]['value'] = $probe_id;
+          $paragraph->field_repeat_n_times[LANGUAGE_NONE][0]['value'] = $num_resp;
+          $paragraph->field_cnc_line_start[LANGUAGE_NONE][0]['value'] = $cnc_start_resp;
+          $paragraph->field_cnc_line_end[LANGUAGE_NONE][0]['value'] = $cnc_stop_resp;
+          $paragraph->save();
+        }*/
+
+      }
+      fclose($handle);
+    }
+    else {
+      backdrop_set_message('Failed to open log file.');
+    }
+  }
+
+}
+
+function zeus_form_alter(&$form, &$form_state, $form_id) {
+/*  if ($form_id == 'job_submission_node_form') {
+    $form['title']['#default_value'] = 'Test' . rand(0,9999);
+    $form['title']['#maxlength'] = 10;
+  }*/
+}
+
+/**
+ * Implements hook_config_info().
+ */
+function zeus_config_info() {
+/*  $prefixes['zeus.settings'] = array(
+    'label' => t('Zeus settings'),
+    'group' => t('Configuration'),
+  );
+  return $prefixes;*/
+}
+
+
+function zeus_node_insert($node) {
+  /*
+  $submit_job = true;
+  $node->field_job_status[LANGUAGE_NONE]['0']['value'] = 0; // Failed
+
+  $job_result = views_get_view_result('all_job', 'page_1');
+  $job_size = $node->field_csize[LANGUAGE_NONE][0]['value']; // 3 = L
+
+  if (isset($job_result)) {
+    foreach ($job_result as $job_key => $job_value) {
+      if ($job_value->field_field_job_status[0]['raw']['value'] == 1) { // 1 = Running
+        if ($job_value->field_field_csize[0]['raw']['value'] == $job_size) { // Job already submitted to size.
+          backdrop_set_message(t('There is a running job on selected cluster size. Job listed as incomplete.'), 'error');
+          $node->field_job_status[LANGUAGE_NONE]['0']['value'] = 2; // Incomplete
+          $submit_job = false;
+        }
+      }
+    }
+  }
+
+  if ($submit_job) {
+    backdrop_set_message(t('Will send UDP message to Master to fire off job.'));
+
+    if (isset($node->field_file) && isset($node->field_file['und']) &&
+      isset($node->field_file['und'][0]) && isset($node->field_file['und'][0]['fid'])) {
+
+        $file = file_load($node->field_file['und'][0]['fid']);
+
+        $job_submitted = false;
+
+        $job_submitted = zeus_execute_job(
+          $file->filename,
+          $node->title,
+          $node->field_analysis_setup['und'][0]['value'],
+          $node->field_csize['und'][0]['value'],
+          $node->field_requested_cores['und'][0]['value'],
+          $node->field_requested_tasks['und'][0]['value']);
+
+        if ($job_submitted) {
+          backdrop_set_message(t('Job submit successful.'));
+          $node->field_job_status[LANGUAGE_NONE]['0']['value'] = 1; //Running
+          //dsm($node);
+        }
+    }
+    else {
+        backdrop_set_message(t('File Error.'), 'error');
+        $node->field_job_status[LANGUAGE_NONE]['0']['value'] = 0; //Failed
+    }
+  }
+
+  field_attach_update('node', $node); //Save field updates (e.g. job status)
+  */
+//  backdrop_set_message(t('Job saved. Please select parameters on job form.'));
+//  backdrop_set_message("<a href='/jobconfig/$node->nid'>Here</a>");
+
+}
+
+function zeus_execute_job($filename, $jobname, $analysis, $size, $req_cores, $req_tasks) {
+
+  $term = '';
+  switch ($size) {
+    case 0:
+      $term = taxonomy_term_load(4);
+      //$server = SGE;
+      break;
+    case 1:
+      $term = taxonomy_term_load(1);
+      //$server = SERVER_IP_SMALL;
+      break;
+    case 2:
+      $term = taxonomy_term_load(2);
+      //$server = SERVER_IP_MEDIUM;
+      break;
+    case 3:
+      $term = taxonomy_term_load(3);
+      //$server = SERVER_IP_LARGE;
+      break;
+    default:
+      $term = taxonomy_term_load(1);
+      //$server = SERVER_IP;
+      break;
+  }
+  $server = $term->field_masterip[LANGUAGE_NONE][0]['value'];
+  $port = 9999;
+
+  backdrop_set_message("Sending to cluster size: " . $size . " at " . $server);
+
+  if(!($sock = socket_create(AF_INET, SOCK_DGRAM, 0)))
+  {
+      $errorcode = socket_last_error();
+      $errormsg = socket_strerror($errorcode);
+
+      backdrop_set_message("Couldn't create socket: [$errorcode] $errormsg \n", 'error');
+      return false;
+  }
+
+  socket_set_option ( $sock, SOL_SOCKET, SO_SNDTIMEO, array("sec"=>5, "usec"=>0 ));
+  socket_set_option ( $sock, SOL_SOCKET, SO_RCVTIMEO, array("sec"=>5, "usec"=>0 ));
+
+  backdrop_set_message("Socket created \n");
+
+  //Take some input to send
+  $input = $filename . '~~~~' . $jobname . '~~~~' . $analysis . '~~~~' . $size . '~~~~' . $req_cores . '~~~~' . $req_tasks;
+
+  backdrop_set_message($input);
+
+  //Send the message to the server
+  if( ! socket_sendto($sock, $input , strlen($input) , 0 , $server , $port))
+  {
+    $errorcode = socket_last_error();
+    $errormsg = socket_strerror($errorcode);
+
+    backdrop_set_message("Could not send data: [$errorcode] $errormsg \n", 'error');
+    return false;
+  }
+
+  //Now receive reply from server and print it
+  if(socket_recv ( $sock , $reply , 2045 , MSG_WAITALL ) === FALSE)
+  {
+    $errorcode = socket_last_error();
+    $errormsg = socket_strerror($errorcode);
+
+    backdrop_set_message("Could not receive data: [$errorcode] $errormsg \n", 'error');
+    return false;
+  }
+
+  backdrop_set_message("Reply from server: $reply");
+  return true;
+
+}
+
+/**
+ * Implements hook_menu().
+ *
+ */
+function zeus_menu() {
+  $items = array();
+
+/*  $items['jobconfig/%'] = array(
+    'title' => 'Job Parameter Selection',
+    //'page arguments' => array(1),
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('form_zeus_job_config', 1),
+    'access callback' => TRUE,
+    'description' => 'Job Parameter Configuration',
+    'file' => 'zeus_forms.inc',
+    'type' => MENU_CALLBACK,
+  );
+*/
+  return $items;
+}
+
+/**
+ * Page callback for our general info page.
+ */
+function zeus_intro() {
+  $markup = t('Zeus');
+  return array('#markup' => $markup);
+}
+
+/**
+ * @} End of "defgroup zeus".
+ */

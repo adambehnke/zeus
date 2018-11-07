@@ -1,0 +1,6 @@
+name = Zeus Module
+description = Provides custom logic and operations for Zeus controller.
+package = Zeus
+core = 7.x
+version = BACKDROP_VERSION
+backdrop = 1.x
